@@ -44,11 +44,13 @@ void kfree(void* page){
         return;
 
     std::uintptr_t address =
-    reinterpret_cast<std::uintptr_t>(page);
+    reinterpret_cast<std::uintptr_t>(page); //std::uintptr_t：为指针定制的整数类型，使之可以进行数学运算
 
+    //物理地址的起始
     std::uintptr_t begin =
     reinterpret_cast<std::uintptr_t>(physical_memory);
 
+    //物理地址的结束
     std::uintptr_t last =
     begin + kPhysicalMemorySize - kPageSize;
 

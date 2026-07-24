@@ -15,8 +15,10 @@ struct PageTableEntry {
 constexpr std::size_t kVirtualPageCount =
     1024 * 1024 / kPageSize;
 
+    //虚拟内存大小
 constexpr std::size_t  kVirtualMemorySize = 
     1024 * 1024;
+
 //页表
 struct PageTable {
     PageTableEntry entries[kVirtualPageCount];

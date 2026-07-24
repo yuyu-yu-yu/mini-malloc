@@ -7,7 +7,8 @@
 namespace {
 
 constexpr std::size_t kHeapSize = 1024 * 1024;  // 定义一个代表1MB大小的常量kHeapSize
-alignas(16) unsigned char heap[kHeapSize];      // 申请一块 1MB 的原始内存，我们模拟管理的就是这块内存
+alignas(16) unsigned char heap[kHeapSize];      // C++ 层面整块空间从一开始就已存在；本项目通过 current_process.size
+                                                // 逻辑上规定目前只有前多少字节可以由分配器使用。
 //std::size_t heap_used = 0;                      //表示目前已经被malloc管理的内存大小,这里是以字节为单位的,
 //用current_process.size代替了  -v-
 
@@ -31,7 +32,7 @@ void* sim_sbrk(std::size_t bytes) {
     std::size_t old_size = current_process.size;    //记录旧size
     if(growproc(current_process, bytes) == false)
         return nullptr;
-    void *old_p = heap + old_size;
+    void *old_p = heap + old_size;  //这里实际上放开了heap这个空间的使用权限，我们并没有真正的去申请内存，而是通过growproc()来维护当前进程的虚拟地址空间大小，模拟了sbrk()的功能
     return old_p;
 }
 
@@ -51,9 +52,9 @@ BlockHeader* morecore(std::size_t nunits) {
     my_free(p + 1); //因为my_free会通过传入的地址找回头部
     return freep;   //因为p可能被合并了
 }
-}
+}//匿名空间结束
 
-//my_malloc()和my_free()的核心都是维护空闲链表这个数据结构
+//my_malloc()和my_free()的核心都是维护空闲链表这个数据结构，这里的空闲链表指的是每一块的BlockHeader
 
 void* my_malloc(std::size_t size) {
     if(size == 0 || size > kHeapSize){
@@ -91,6 +92,7 @@ void* my_malloc(std::size_t size) {
         }
         if(p == freep)
             //这里后续补充内存扩充函数
+            //已补充
             if((p = morecore(nunits)) == nullptr)
                 return nullptr;
     }
