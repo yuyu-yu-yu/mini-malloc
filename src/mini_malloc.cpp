@@ -2,6 +2,7 @@
 #include "process_memory.hpp"
 
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 
 namespace {
@@ -180,10 +181,10 @@ bool validate_heap() {
 }
 
 void dump_heap() {
-    std::cout << "free list dump\n";
+    std::cout << "用户态空闲链表：\n";
 
     if (freep == nullptr) {
-        std::cout << "  <not initialized>\n";
+        std::cout << "  <尚未初始化>\n";
         return;
     }
 
@@ -195,30 +196,151 @@ void dump_heap() {
 
     do {
         if (current == nullptr) {
-            std::cout << "  [" << index << "] nullptr node\n";
+            std::cout << "  [" << index << "] 空指针节点\n";
             return;
         }
 
         if (current == &base) {
-            std::cout << "  [" << index << "] base sentinel"
-                      << " next=" << current->ptr << "\n";
+            std::cout << "  [" << index << "] 哨兵 base"
+                      << "，下一节点=" << current->ptr << "\n";
         } else {
             const std::uintptr_t addr =
                 reinterpret_cast<std::uintptr_t>(current);
             const std::size_t offset = addr - heap_begin;
             const std::size_t bytes = current->size * sizeof(BlockHeader);
 
-            std::cout << "  [" << index << "] offset=" << offset
-                      << " size_units=" << current->size
-                      << " size_bytes=" << bytes
-                      << " next=" << current->ptr << "\n";
+            std::cout << "  [" << index << "] heap偏移=" << offset
+                      << "B，大小=" << current->size
+                      << "个BlockHeader=" << bytes
+                      << "B，下一节点=" << current->ptr << "\n";
         }
 
         current = current->ptr;
         index++;
         if (index > max_nodes) {
-            std::cout << "  <stop: possible cycle or corrupted free list>\n";
+            std::cout << "  <停止：链表可能存在异常循环或结构损坏>\n";
             return;
         }
     } while (current != freep);
+}
+
+bool validate_memory_system() {
+    if (!validate_heap()) {
+        return false;
+    }
+
+    if (!memory_system_initialized) {
+        return true;
+    }
+
+    return validate_page_allocator()
+        && validate_page_table(current_process.page_table)
+        && current_process.size <= kHeapSize;
+}
+
+void dump_pointer_mapping(const void* ptr) {
+    std::cout << "返回指针的地址关系：\n";
+
+    if (ptr == nullptr) {
+        std::cout << "  返回指针：nullptr\n";
+        return;
+    }
+
+    const std::uintptr_t heap_begin =
+        reinterpret_cast<std::uintptr_t>(heap);
+    const std::uintptr_t heap_end = heap_begin + kHeapSize;
+    const std::uintptr_t address =
+        reinterpret_cast<std::uintptr_t>(ptr);
+
+    std::cout << "  malloc实际返回的heap地址：" << ptr << "\n";
+
+    if (address < heap_begin || address >= heap_end) {
+        std::cout << "  <该指针不在heap数组中>\n";
+        return;
+    }
+
+    const std::size_t virtual_address = address - heap_begin;
+    std::cout << "  heap起始地址：" << static_cast<void*>(heap) << "\n"
+              << "  模拟用户虚拟地址（heap偏移）：0x"
+              << std::hex << virtual_address << std::dec
+              << "，即 " << virtual_address << "B\n";
+
+    if (!memory_system_initialized
+        || virtual_address >= current_process.size) {
+        std::cout << "  <该位置尚未包含在进程的逻辑可用空间中>\n";
+        return;
+    }
+
+    const std::size_t page_index = virtual_address / kPageSize;
+    const std::size_t page_offset = virtual_address % kPageSize;
+    const PageTableEntry& entry =
+        current_process.page_table.entries[page_index];
+
+    std::cout << "  虚拟页号：" << page_index << "\n"
+              << "  页内偏移：0x" << std::hex << page_offset
+              << std::dec << "，即 " << page_offset << "B\n";
+
+    if (!entry.valid || entry.physical_page == nullptr) {
+        std::cout << "  模拟页表项：未映射\n";
+        return;
+    }
+
+    const std::uintptr_t physical_page =
+        reinterpret_cast<std::uintptr_t>(entry.physical_page);
+    const std::uintptr_t simulated_physical_address =
+        physical_page + page_offset;
+
+    std::cout << "  页表映射：虚拟页" << page_index
+              << " -> 模拟物理页 " << entry.physical_page << "\n"
+              << "  模拟物理地址：0x" << std::hex
+              << simulated_physical_address << std::dec << "\n"
+              << "  说明：C++实际读写heap地址；模拟物理地址只记录映射关系。\n";
+}
+
+void dump_memory_system() {
+    std::cout << "\n========== 模拟内存系统快照 ==========\n";
+    std::cout << "初始化状态："
+              << (memory_system_initialized ? "已初始化" : "尚未初始化")
+              << "\n";
+    std::cout << "heap容量：" << kHeapSize << "B\n";
+
+    if (memory_system_initialized) {
+        std::cout << "当前进程逻辑大小：" << current_process.size << "B\n";
+        std::cout << "当前映射页数："
+                  << (current_process.size + kPageSize - 1) / kPageSize
+                  << "\n";
+    }
+
+    std::cout << "\n[1] 用户态小块分配器\n";
+    dump_heap();
+
+    std::cout << "\n[2] 模拟物理页分配器\n";
+    if (memory_system_initialized) {
+        dump_page_allocator();
+    } else {
+        std::cout << "物理页分配器尚未初始化。\n";
+    }
+
+    std::cout << "\n[3] 模拟进程页表\n";
+    if (memory_system_initialized) {
+        dump_page_table(current_process.page_table);
+    } else {
+        std::cout << "进程页表尚未初始化。\n";
+    }
+
+    std::cout << "\n[4] 结构校验\n";
+    std::cout << "  用户态空闲链表："
+              << (validate_heap() ? "通过" : "失败") << "\n";
+    if (memory_system_initialized) {
+        std::cout << "  模拟物理页分配器："
+                  << (validate_page_allocator() ? "通过" : "失败")
+                  << "\n";
+        std::cout << "  模拟进程页表："
+                  << (validate_page_table(current_process.page_table)
+                      ? "通过" : "失败")
+                  << "\n";
+    }
+    std::cout << "  内存系统整体："
+              << (validate_memory_system() ? "通过" : "失败") << "\n";
+    std::cout << "======================================\n";
 }

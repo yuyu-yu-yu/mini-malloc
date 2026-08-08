@@ -122,16 +122,18 @@ bool validate_page_allocator(){
 void dump_page_allocator(){
     constexpr std::size_t kTotalPages =
         kPhysicalMemorySize / kPageSize;
+    constexpr std::size_t kPreviewLimit = 8;
     const std::uintptr_t begin =
         reinterpret_cast<std::uintptr_t>(physical_memory);
     const std::uintptr_t end = begin + kPhysicalMemorySize;
     bool visited[kTotalPages] = {};
 
-    std::cout << "page allocator: free=" << free_pages_count
-              << "/" << kTotalPages << "\n";
+    std::cout << "物理页分配器：空闲=" << free_pages_count
+              << "/" << kTotalPages
+              << "，已分配=" << kTotalPages - free_pages_count << "\n";
 
     if (free_pages == nullptr) {
-        std::cout << "  <empty>\n";
+        std::cout << "  <空闲物理页链表为空>\n";
         return;
     }
 
@@ -144,30 +146,37 @@ void dump_page_allocator(){
 
         if (address < begin || address >= end) {
             std::cout << "  [" << list_index
-                      << "] invalid address=" << page << "\n";
+                      << "] 非法地址=" << page << "\n";
             return;
         }
 
         const std::uintptr_t offset = address - begin;
         if (offset % kPageSize != 0) {
             std::cout << "  [" << list_index
-                      << "] unaligned address=" << page << "\n";
+                      << "] 未按页对齐的地址=" << page << "\n";
             return;
         }
 
         const std::size_t page_index = offset / kPageSize;
         if (visited[page_index]) {
-            std::cout << "  [" << list_index << "] page=" << page_index
-                      << " <duplicate or cycle>\n";
+            std::cout << "  [" << list_index << "] 物理页=" << page_index
+                      << " <重复节点或异常循环>\n";
             return;
         }
 
         visited[page_index] = true;
-        std::cout << "  [" << list_index << "] page=" << page_index
-                  << " address=" << page
-                  << " next=" << page->next << "\n";
+        if (list_index < kPreviewLimit) {
+            std::cout << "  [" << list_index << "] 物理页=" << page_index
+                      << "，地址=" << page
+                      << "，下一节点=" << page->next << "\n";
+        }
 
         page = page->next;
         list_index++;
+    }
+
+    if (list_index > kPreviewLimit) {
+        std::cout << "  ...其余 " << list_index - kPreviewLimit
+                  << " 个空闲物理页省略\n";
     }
 }
